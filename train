@@ -1,0 +1,202 @@
+import torch
+import torch.nn as nn
+import torch.utils.data as Data
+import matplotlib.pyplot as plt
+import numpy as np
+import PIL.Image
+import matplotlib
+import os
+class Model(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.cnn1 = nn.Conv2d(in_channels=3,
+                              out_channels=16,
+                              kernel_size=5,
+                              stride=2,
+                              padding=0)
+        self.cnn2 = nn.Conv2d(in_channels=16,
+                              out_channels=32,
+                              kernel_size=3,
+                              stride=1,
+                              padding=1)
+        self.cnn3 = nn.Conv2d(in_channels=32,
+                              out_channels=128,
+                              kernel_size=7,
+                              stride=1,
+                              padding=0)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.relu = nn.ReLU()
+        self.fc = nn.Linear(in_features=128, out_features=num_classes)
+    def forward(self, x):
+        x = self.cnn1(x)
+        x = self.relu(x)
+        x = self.cnn2(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = self.cnn3(x)
+        x = self.relu(x)
+        x = x.flatten(start_dim=1)
+        return self.fc(x)
+# 加载数据集函数
+def loadData(data_dir):
+    xData = list()
+    yData = list()
+    labelNameDict = dict()
+    listdir = os.listdir(data_dir)
+    for label, labelName in enumerate(listdir):
+        labelNameDict[label] = labelName
+        for filename in os.listdir(os.path.join(data_dir, labelName)):
+            if not filename.endswith('.jpg'):
+                continue
+            imageSize = (32, 32)
+            x = PIL.Image.open(os.path.join(data_dir, labelName, filename)).resize(imageSize)
+            x = torch.FloatTensor(np.array(x)) / 255
+            x = x.permute(2, 0, 1)
+            xData.append(x)
+            yData.append(label)
+    return xData, yData, labelNameDict
+# 定义数据集类232
+# 训练函数
+def train(model, loader):
+    device = torch.device('cpu')
+    model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    loss_fun = nn.CrossEntropyLoss()
+    model.train()
+    for epoch in range(5):                                # 函数训练5轮
+        for step, (x, y) in enumerate(loader):
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+            loss = loss_fun(out, y)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            if step % 200 == 0:
+                acc = (out.argmax(dim=1) == y).float().mean().item()
+                print(f"Epoch: {epoch}, Step: {step}, Loss: {loss.item()}, Accuracy: {acc}")
+    # 保存模型状态字典
+    torch.save(model.state_dict(), "./hands.pth")  # 手势识别的方式
+# 测试函数
+@torch.no_grad()
+def test(model, loader):
+    device = torch.device('cpu')
+    model.to(device)
+    model.eval()
+    correct = 0
+    total = 0
+    for i, (x, y) in enumerate(loader):
+        x, y = x.to(device), y.to(device)
+        out = model(x).argmax(dim=1)          # 对象对输入数据，进行前向传播计算.argmax(dim=1)表示在模型的输出结果中沿着第一个维度（通常是类别维度）找到最大值的索引，返回这个索引作为输出。
+        correct += (out == y).sum().item()
+        total += len(y)
+    accuracy = correct / total
+    print("Accuracy:", accuracy)
+class Dataset(Data.Dataset):
+    def __init__(self, xData, yData):
+        self.xData = xData
+        self.yData = yData
+    def __len__(self):
+        return len(self.xData)
+    def __getitem__(self, i):
+        return self.xData[i], self.yData[i]
+# 方法是 Dataset 类的构造函数。在创建 Dataset 类的实例时，需要传入两个参数 xData 和 yData，分别表示特征数据和标签数据。在构造函数中，这两个参数被存储为类的属性，以便在后续的数据访问中使用。
+# __len__(self): 这个方法用于获取数据集的长度，即数据集中样本的数量。在 PyTorch 中，数据集的长度通常是通过实现 __len__ 方法来指定的。这个方法返回 xData 的长度，因为特征数据和标签数据的长度应该一致。
+# __getitem__(self, i): 这个方法用于根据索引 i 获取数据集中的一个样本。在 PyTorch 中，数据集的样本通常是通过实现 __getitem__ 方法来获取的。在这个方法中，根据索引 i，分别从特征数据 xData 和标签数据 yData 中取出对应位置的特征和标签，并将它们作为元组返回。
+def plot_labels_predictions(labels, predictions):        #
+    plt.figure(figsize=(8, 6))
+    plt.scatter(labels, predictions, color='blue', label='Predictions vs Labels')
+    plt.plot(labels, labels, color='red', linestyle='--', label='Ideal Prediction')
+    plt.title('Labels vs Predictions')
+    plt.xlabel('Labels')
+    plt.ylabel('Predictions')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+# 测试数据集
+def get_predictions_labels(model, loader):
+    device = torch.device('cpu')
+    model.to(device)                                                     # CPU的运行
+    model.eval()
+    predictions = []
+    labels = []
+    for x, y in loader:
+        x, y = x.to(device), y.to(device)
+        out = model(x).argmax(dim=1)   # 进行前向传播计算，得到模型的输出。.argmax(dim=1) 则表示在模型的输出结果中，沿着第一个维度（通常是类别维度）找到最大值的索引，这个索引即模型的预测结果。
+        predictions.extend(out.cpu().numpy())
+        labels.extend(y.cpu().numpy())
+    return predictions, labels
+# test_loader: 这是一个用于加载测试集的数据加载器对象。
+# Data.DataLoader: 同上述相同，用于加载数据的类。
+# dataset = test_dataset: 这表示要加载的数据集是
+# test_dataset，也就是测试数据集。
+# batch_size = 8: 同上述相同，每个批次加载的样本数量为8
+# shuffle = False: 这表示在加载测试集时不对数据进行洗牌。在测试模型时，我们通常不需要对数据进行洗牌，以保持数据的顺序性。
+# drop_last = False: 这表示不丢弃最后一个批次，即使其样本数量不足8个。在测试过程中，通常不会对测试数据进行丢弃，以尽可能利用所有的测试样本进行评估。
+if __name__ == "__main__":
+    train_data_dir = "./gestures/train"  # 加载训练集
+    test_data_dir = "./gestures/test"  # 加载测试集
+    num_classes = len(os.listdir(train_data_dir))                        # 类别
+    xTrainData, yTrainData, labelNameDict = loadData(train_data_dir)     # 加载xy训练和测试
+    xTestData, yTestData, _ = loadData(test_data_dir)
+    # 创建数据集和数据加载器
+    train_dataset = Dataset(xTrainData, yTrainData)
+    test_dataset = Dataset(xTestData, yTestData)
+    train_loader = Data.DataLoader(dataset=train_dataset, batch_size=8, shuffle=True, drop_last=True)  # 训练集加载器
+    test_loader = Data.DataLoader(dataset=test_dataset, batch_size=8, shuffle=False, drop_last=False)  # 测试集加载器
+    # 创建模型并训练
+    model = Model(num_classes)
+    train(model, train_loader)
+    # 加载预训练模型参数
+    model.load_state_dict(torch.load("./hands.pth"))
+    # 在测试集上进行预测并显示结果
+    predictions, labels = get_predictions_labels(model, test_loader)
+    print("Predictions:", predictions)
+    print("Labels:", labels)
+    plot_labels_predictions(labels, predictions)
+# train_data_dir = "./gestures/train"                    # 加载训练集
+# test_data_dir = "./gestures/test"                      # 加载训练集
+# num_classes = len(os.listdir(train_data_dir))          # 这里定义了 num_classes,分类项目下所有的分类类别
+# xTrainData, yTrainData, labelNameDict = loadData(train_data_dir)
+# xTestData, yTestData, _ = loadData(test_data_dir)
+# train_dataset = Dataset(xTrainData, yTrainData)
+# test_dataset = Dataset(xTestData, yTestData)
+# train_loader = Data.DataLoader(dataset=train_dataset, batch_size=8, shuffle=True, drop_last=True)  # 加载安测试集
+# test_loader = Data.DataLoader(dataset=test_dataset, batch_size=8, shuffle=False, drop_last=False)  # 加载
+# model = Model(num_classes)
+# train(model, train_loader)
+# test(model, test_loader)
+# # 创建一个名为 model 的神经网络模型，num_classes 是模型输出的类别数目
+# model = Model(num_classes)
+# # 打印该模型的结构信息
+# print(model)
+# # 从指定路径 ./hands.pth 加载预训练好的模型参数到创建的模型中
+# model.load_state_dict(torch.load("./hands.pth"))
+# predictions, labels = get_predictions_labels(model, test_loader)  # 预测
+# # 显示测试集预测效果
+# print("Predictions:", predictions)
+# print("Labels:", labels)
+# plot_labels_predictions(labels, predictions)
+# # 类一般首字母大写
+# class Tu:
+#     hrad = 1
+#     rea = 2
+#     def panshen(self):
+#         print('生命不止奋斗补习')
+# class Tao:
+#     def tsotao(self):
+#         print('taotaogood')
+#     def ta(num):
+#         print('very good')
+#     def jie(num):
+#         if(num == 1):print('num = 2')
+#         if (num == 2):print('num = 3')
+#         if (num == 3):print('num = 4')
+# def han(n, x, y, z):
+#     if n == 1:
+#          print(f"将第1个盘子从 {x} 移动到 {z}")
+#     else:
+#          han(n-1, x, z, y)
+#          print(f"将第{n}个盘子从 {x} 移动到 {z}")
+#          han(n-1, y, x, z)
+# # 测试函数,移动3个盘子
+# han(3,'A','B','C')
