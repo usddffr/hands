@@ -1,0 +1,40 @@
+import torch
+import cv2
+import os
+from PIL import Image
+from anme import Model
+from torchvision import transforms
+if __name__ == '__main__':
+    num_classes = len(os.listdir("./gestures/train"))
+    model = Model(num_classes)
+    model.load_state_dict(torch.load("./hands.pth"))
+    model.eval()
+    preprocess_transform = transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+    ])
+    capture = cv2.VideoCapture(0)
+    if cv2.VideoCapture.isOpened(capture):
+        print("摄像头打开成功!")
+    else:
+        print("摄像头打开失败!")
+    class_names = ['无', '布', '石头', '剪刀']
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    while True:
+        _, frame = capture.read()
+        frame2 = frame
+        frame = cv2.resize(frame, (32, 32))
+        frame_tensor = torch.tensor(frame, dtype=torch.float).permute(2, 0, 1).unsqueeze(0).to(device)
+        with torch.no_grad():
+            out = model(frame_tensor)
+        _, indices = torch.sort(out, descending=True)
+        percentage = torch.nn.functional.softmax(out, dim=1)[0]
+        print("预测结果：", class_names[indices[0][0]], "概率：", percentage[indices[0][0]].item())
+        if percentage[indices[0][0]].item() >= 0.7:
+            cv2.putText(frame2, class_names[indices[0][0]], (5, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
+        cv2.imshow("Img", frame2)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    capture.release()
+    cv2.destroyAllWindows()
